@@ -1,0 +1,93 @@
+import UIKit
+
+import CoreNFC
+
+let keyMatrix: [[Int]] = [[1, 2], [3, 4]]
+let dataMatrix: [[Int]] = [[5, 6], [7, 8]]
+
+let encryptedMatrix = multiplyMatrix(matrix1: keyMatrix, matrix2: dataMatrix)
+
+let binaryString = encodeMatrix(matrix: dataMatrix)
+
+func tagReaderSession(_ session: NFCTagReaderSession, didDetect tags: [NFCTag]) {
+    if let tag = tags.first, case let NFCTag.iso7816(tag) = tag {
+        tag.connect { (error: Error?) in
+            if error != nil {
+                session.invalidate(errorMessage: "Connection error. Please try again.")
+                return
+            }
+            let apdu = NFCISO7816APDU(instructionClass: 0x00, instructionCode: 0xB0, p1Parameter: 0x00, p2Parameter: 0x00, data: Data([]), expectedResponseLength: 16)
+            tag.sendCommand(apdu: apdu) { (responseData: Data, sw1: UInt8, sw2: UInt8, error: Error?) in
+                if error == nil && sw1 == 0x90 && sw2 == 0x00 {
+                    let key = String(bytes: responseData, encoding: .utf8)
+                    let keyMatrix = decodeMatrix(binaryString: binaryString)
+                    let decryptedMatrix = multiplyMatrix(matrix1: keyMatrix, matrix2: encryptedMatrix)
+                    print("Decrypted matrix:\n", decryptedMatrix)
+                } else {
+                    session.invalidate(errorMessage: "Error reading NFC tag. Please try again.")
+                }
+            }
+        }
+    }
+}
+
+func multiplyMatrix(matrix1: [[Int]], matrix2: [[Int]]) -> [[Int]] {
+    let rows1 = matrix1.count
+    let cols1 = matrix1[0].count
+    let rows2 = matrix2.count
+    let cols2 = matrix2[0].count
+    
+    if cols1 != rows2 {
+        fatalError("Matrix dimensions are invalid.")
+    }
+    
+    var resultMatrix = Array(repeating: Array(repeating: 0, count: cols2), count: rows1)
+    
+    for i in 0..<rows1 {
+        for j in 0..<cols2 {
+            for k in 0..<cols1 {
+                resultMatrix[i][j] += matrix1[i][k] * matrix2[k][j]
+            }
+        }
+    }
+    
+    return resultMatrix
+}
+
+func encodeMatrix(matrix: [[Int]]) -> String {
+    var binaryString = ""
+    
+    for row in matrix {
+        for element in row {
+            let binaryElement = String(element, radix: 2)
+            let paddedBinaryElement = String(repeating: "0", count: 8 - binaryElement.count) + binaryElement
+            binaryString += paddedBinaryElement
+        }
+    }
+    
+    return binaryString
+}
+
+func decodeMatrix(binaryString: String) -> [[Int]] {
+    let numRows = 2
+    let numCols = 2
+    var binaryStringIndex = 0
+    var matrix = Array(repeating: Array(repeating: 0, count: numCols), count: numRows)
+    
+    for i in 0..<numRows {
+        for j in 0..<numCols {
+            let startIndex = binaryString.index(binaryString.startIndex, offsetBy: binaryStringIndex)
+            let endIndex = binaryString.index(startIndex, offsetBy: 8)
+            let binaryElement = String(binaryString[startIndex..<endIndex])
+            matrix[i][j] = Int(binaryElement, radix: 2)!
+            binaryStringIndex += 8
+        }
+    }
+    
+    return matrix
+}
+
+let session = NFCTagReaderSession(pollingOption: .iso14443, delegate: self)
+session.begin()
+
+
